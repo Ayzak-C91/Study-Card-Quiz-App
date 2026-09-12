@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { X, Upload, Plus, Trash2, ChevronLeft, ChevronRight, Check, Shuffle, RotateCcw, FileText, ArrowLeft, Pencil, Layers, CheckSquare, Square } from "lucide-react";
 
-
-
 /* ---------- localStorage-backed shim matching the artifact storage API ---------- */
+/* (only used outside claude.ai, where window.storage doesn't exist) */
 if (typeof window !== "undefined" && !window.storage) {
   window.storage = {
     async get(key) {
@@ -21,169 +20,353 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 
+/* ---------- seed deck, parsed from the uploaded Gemini file ---------- */
+const SEED_RAW = `[
+    {
+        "question": "1. Where are hematopoietic stem cells primarily produced in the bone marrow?",
+        "options": ["A) Pelvis", "B) Scapula", "C) Skull", "D) Clavicle"],
+        "answer": "A" 
+    },
+    {
+        "question": "2. Approximately what fraction of blood cells in the human body are red blood cells (RBCs)?",
+        "options": ["A) 3 out of 10", "B) 5 out of 10", "C) 8 out of 10", "D) 9 out of 10"],
+        "answer": "C" 
+    },
+    {
+        "question": "3. What is the typical lifecycle duration of a red blood cell?",
+        "options": ["A) 1-2 weeks", "B) 3-4 months", "C) 6-8 months", "D) 1 year"],
+        "answer": "B" 
+    },
+    {
+        "question": "4. What is the normal hemoglobin reference range for adult males?",
+        "options": ["A) 10.0-12.0 g/dL", "B) 12.0-15.5 g/dL", "C) 13.5-17.5 g/dL", "D) 18.0-22.0 g/dL"],
+        "answer": "C" 
+    },
+    {
+        "question": "5. What is the normal hematocrit reference range for adult females?",
+        "options": ["A) 20-30%", "B) 36-48%", "C) 50-60%", "D) 65-70%"],
+        "answer": "B" 
+    },
+    {
+        "question": "6. Which blood cell line is primarily responsible for immune defense and fighting infection?",
+        "options": ["A) Erythrocytes", "B) Thrombocytes", "C) Leukocytes", "D) Megakaryocytes"],
+        "answer": "C" 
+    },
+    {
+        "question": "7. What protein inside cells stores iron and is used to indirectly measure iron levels in the blood?",
+        "options": ["A) Albumin", "B) Ferritin", "C) Myoglobin", "D) Globulin"],
+        "answer": "B" 
+    },
+    {
+        "question": "8. What diagnostic test is considered the most definitive for diagnosing Iron Deficiency Anemia (IDA)?",
+        "options": ["A) Complete Blood Count", "B) Peripheral Blood Smear", "C) Bone Marrow Aspiration", "D) Schilling Test"],
+        "answer": "C" 
+    },
+    {
+        "question": "9. Oral iron supplements (such as ferrous sulfate) commonly cause which characteristic side effect?",
+        "options": ["A) Metallic taste and constipation", "B) Sweet taste and diarrhea", "C) Bright red stools", "D) Hair growth"],
+        "answer": "A" 
+    },
+    {
+        "question": "10. Which injection method is used for administering IM Iron Dextran to avoid skin staining and pain/irritation?",
+        "options": ["A) Z-track method", "B) Intravenous push", "C) Subcutaneous pinch", "D) Intra-arterial method"],
+        "answer": "A" 
+    },
+    {
+        "question": "11. What color does a patient's stool typically turn when taking oral iron preparations?",
+        "options": ["A) White", "B) Red", "C) Black", "D) Yellow"],
+        "answer": "C" 
+    },
+    {
+        "question": "12. Which vitamin should be taken with iron supplements to increase absorption?",
+        "options": ["A) Vitamin A", "B) Vitamin C", "C) Vitamin D", "D) Vitamin K"],
+        "answer": "B" 
+    },
+    {
+        "question": "13. Patients should avoid taking iron supplements concurrently with which substances because they decrease absorption?",
+        "options": ["A) Milk, antacids, and calcium", "B) Citrus fruits and juices", "C) Lean red meats", "D) Vitamin C supplements"],
+        "answer": "A" 
+    },
+    {
+        "question": "14. What term describes a decrease in all three blood cell lines (RBCs, WBCs, and platelets) seen in Aplastic Anemia?",
+        "options": ["A) Polycythemia", "B) Pancytopenia", "C) Thrombocythemia", "D) Leukocytosis"],
+        "answer": "B" 
+    },
+    {
+        "question": "15. What aggressive medical treatment is used in aplastic anemia to prevent the patient's lymphocytes from destroying stem cells?",
+        "options": ["A) Antithymocyte globulin and cyclosporine", "B) Heparin and protamine sulfate", "C) Vitamin B12 injections", "D) Iron chelation therapy"],
+        "answer": "A" 
+    },
+    {
+        "question": "16. Megaloblastic anemia is caused by a deficiency of vitamin B12 or which other essential nutrient?",
+        "options": ["A) Calcium", "B) Folic acid", "C) Potassium", "D) Sodium"],
+        "answer": "B" 
+    },
+    {
+        "question": "17. Which substance normally secreted by gastric mucosa cells binds with dietary vitamin B12 so it can be absorbed in the ileum?",
+        "options": ["A) Hydrochloric acid", "B) Intrinsic factor", "C) Pepsinogen", "D) Bile salts"],
+        "answer": "B" 
+    },
+    {
+        "question": "18. What specific type of megaloblastic anemia results from the absence of intrinsic factor?",
+        "options": ["A) Iron deficiency anemia", "B) Pernicious anemia", "C) Aplastic anemia", "D) Sickle cell anemia"],
+        "answer": "B" 
+    },
+    {
+        "question": "19. Which diagnostic test uses a small oral dose of radioactive vitamin B12 followed by a large parenteral non-radioactive dose to check for malabsorption?",
+        "options": ["A) Schilling test", "B) Bone marrow biopsy", "C) Peripheral blood smear", "D) Intrinsic factor antibody test"],
+        "answer": "A" 
+    },
+    {
+        "question": "20. What is the long-term maintenance therapy schedule for Vitamin B12 injections in patients with pernicious anemia?",
+        "options": ["A) Daily", "B) Weekly", "C) Monthly", "D) Yearly"],
+        "answer": "C" 
+    },
+    {
+        "question": "21. What tongue manifestation is classically assessed in patients with pernicious anemia or iron deficiency anemia?",
+        "options": ["A) Black, hairy tongue", "B) Smooth, red, and sore tongue (glossitis)", "C) White patched tongue", "D) Dry, cracked geographical tongue"],
+        "answer": "B" 
+    },
+    {
+        "question": "22. What skin manifestation involving patchy loss of pigmentation is commonly assessed in patients with pernicious anemia?",
+        "options": ["A) Vitiligo", "B) Jaundice", "C) Purpura", "D) Petechiae"],
+        "answer": "A" 
+    },
+    {
+        "question": "23. Which environmental factor can trigger a Sickle Cell crisis due to decreased oxygen pressure?",
+        "options": ["A) Swimming in warm water", "B) Climbing or flying to high altitudes", "C) Consuming high-protein meals", "D) Sleeping on an orthopedic mattress"],
+        "answer": "B" 
+    },
+    {
+        "question": "24. What facial bone structural change is characteristic of beta-thalassemia due to bone marrow expansion?",
+        "options": ["A) Moon face", "B) Chipmunk face", "C) Lion face", "D) Buffalo hump"],
+        "answer": "B" 
+    },
+    {
+        "question": "25. Which medication is an iron-chelating agent prescribed to remove excess iron from organs in thalassemia patients receiving regular blood transfusions?",
+        "options": ["A) Deferoxamine", "B) Furosemide", "C) Hydroxyurea", "D) Prednisone"],
+        "answer": "A" 
+    },
+    {
+        "question": "26. Why might furosemide be administered midway through a blood transfusion for a patient with thalassemia?",
+        "options": ["A) To prevent fluid congestion/overload", "B) To increase iron absorption", "C) To lower platelet counts", "D) To prevent allergic reactions"],
+        "answer": "A" 
+    },
+    {
+        "question": "27. What symptom is notably common and unique in individuals with Polycythemia Vera, especially after taking a hot shower?",
+        "options": ["A) Numbness", "B) Itchiness", "C) Dizziness", "D) Joint pain"],
+        "answer": "B" 
+    },
+    {
+        "question": "28. What platelet count threshold defines Primary Thrombocythemia (Essential Thrombocythemia)?",
+        "options": ["A) Greater than 100,000/mm3", "B) Greater than 300,000/mm3", "C) Consistently greater than 600,000/mm3", "D) Greater than 1,000,000/mm3"],
+        "answer": "C" 
+    },
+    {
+        "question": "29. What term describes the painful burning, warmth, and redness in localized distal extremities experienced in thrombocythemia?",
+        "options": ["A) Erythromelalgia", "B) Raynaud's phenomenon", "C) Koilonychia", "D) Glossitis"],
+        "answer": "A" 
+    },
+    {
+        "question": "30. Which oral chemotherapeutic medication is effective in lowering platelet counts in primary thrombocythemia?",
+        "options": ["A) Hydroxyurea (Hydrea)", "B) Digoxin", "C) Warfarin", "D) Furosemide"],
+        "answer": "A" 
+    },
+    {
+        "question": "31. At what platelet count level can spontaneous, potentially fatal CNS or GI hemorrhages occur?",
+        "options": ["A) Less than 50,000/mm3", "B) Less than 20,000/mm3", "C) Less than 10,000/mm3", "D) Less than 5,000/mm3"],
+        "answer": "D" 
+    },
+    {
+        "question": "32. What type of nursing intervention or stool softener is recommended to prevent constipation and avoid the Valsalva maneuver in thrombocytopenic patients?",
+        "options": ["A) Lactulose / stool softeners", "B) Enemas and rectal suppositories", "C) High-fiber diet with hard manual disimpaction", "D) Regular use of harsh stimulant laxatives"],
+        "answer": "A" 
+    },
+    {
+        "question": "33. The acute form of Idiopathic Thrombocytopenic Purpura (ITP) frequently appears how long after a viral illness in children?",
+        "options": ["A) 1 to 6 days", "B) 1 to 6 weeks", "C) 6 to 12 months", "D) Exactly 2 years"],
+        "answer": "B" 
+    },
+    {
+        "question": "34. In ITP, bleeding from mucosal surfaces (GI, pulmonary) is classified as what type of purpura, carrying a greater risk for intracranial bleeding?",
+        "options": ["A) Dry purpura", "B) Wet purpura", "C) Secondary purpura", "D) Benign purpura"],
+        "answer": "B" 
+    },
+    {
+        "question": "35. Which vaccines should be administered 2 to 3 weeks before a scheduled splenectomy to prevent post-splenectomy sepsis?",
+        "options": ["A) Pneumovax, Haemophilus influenzae B, and meningococcal vaccines", "B) BCG and Hepatitis B vaccines", "C) Tetanus toxoid and rabies vaccines", "D) MMR and Varicella vaccines"],
+        "answer": "A" 
+    },
+    {
+        "question": "36. Hemophilia A is an X-linked inherited bleeding disorder caused by a deficiency or defect in which clotting factor?",
+        "options": ["A) Factor V", "B) Factor VIII", "C) Factor IX", "D) Factor XIII"],
+        "answer": "B" 
+    },
+    {
+        "question": "37. Hemophilia B (Christmas disease) is caused by a deficiency or defect in which clotting factor?",
+        "options": ["A) Factor VII", "B) Factor VIII", "C) Factor IX", "D) Factor X"],
+        "answer": "C" 
+    },
+    {
+        "question": "38. What synthetic vasopressin analog induces a transient rise in factor VIII levels and is useful in mild hemophilia A and von Willebrand's disease?",
+        "options": ["A) Desmopressin (DDAVP)", "B) Aminocaproic acid", "C) Phytonadione", "D) Protamine sulfate"],
+        "answer": "A" 
+    },
+    {
+        "question": "39. In von Willebrand's disease, laboratory tests typically show a normal platelet count alongside which findings?",
+        "options": ["A) Prolonged bleeding time and slightly prolonged PTT", "B) Shortened bleeding time and normal PTT", "C) Decreased PT and normal INR", "D) Elevated fibrinogen levels"],
+        "answer": "A" 
+    },
+    {
+        "question": "40. With the exception of factor VIII, where are most blood coagulation factors synthesized in the body?",
+        "options": ["A) Kidneys", "B) Spleen", "C) Liver", "D) Bone marrow"],
+        "answer": "C" 
+    },
+    {
+        "question": "41. What medication is administered orally or subcutaneously to quickly correct a vitamin K deficiency?",
+        "options": ["A) Phytonadione (Mephyton)", "B) Protamine sulfate", "C) Deferoxamine", "D) Hydroxyurea"],
+        "answer": "A" 
+    },
+    {
+        "question": "42. What complex condition is characterized by the formation of massive tiny clots in the microcirculation, depleting platelets and clotting factors?",
+        "options": ["A) Disseminated Intravascular Coagulopathy (DIC)", "B) Polycythemia Vera", "C) Essential Thrombocythemia", "D) Von Willebrand's Disease"],
+        "answer": "A" 
+    },
+    {
+        "question": "43. Which blood product is given in DIC to specifically replace fibrinogen and factors V and VII?",
+        "options": ["A) Cryoprecipitate", "B) Packed Red Blood Cells", "C) Platelet concentrate", "D) Albumin solution"],
+        "answer": "A" 
+    },
+    {
+        "question": "44. What reversal agent is prescribed for warfarin (coumarin derivative) toxicity?",
+        "options": ["A) Vitamin K", "B) Protamine sulfate", "C) Calcium gluconate", "D) Naloxone"],
+        "answer": "A" 
+    },
+    {
+        "question": "45. What medication is used to promptly reverse the effects of heparin toxicity?",
+        "options": ["A) Protamine sulfate", "B) Vitamin K", "C) Iron dextran", "D) Furosemide"],
+        "answer": "A" 
+    },
+    {
+        "question": "46. What serious immunologic complication of heparin therapy causes a falling platelet count below 100,000/mL after more than 5 days of use?",
+        "options": ["A) Heparin-induced thrombocytopenia (HIT)", "B) Idiopathic thrombocytopenic purpura", "C) Thrombotic thrombocytopenic purpura", "D) Primary thrombocythemia"],
+        "answer": "A" 
+    },
+    {
+        "question": "47. According to drug interaction guidelines, which vitamin or supplement decreases the anticoagulant effect of oral anticoagulants?",
+        "options": ["A) Vitamin C", "B) Vitamin E", "C) Garlic", "D) Gingko"],
+        "answer": "A" 
+    },
+    {
+        "question": "48. What is the normal serum iron reference range for adult males?",
+        "options": ["A) 20-50 mcg/dL", "B) 60-180 mcg/dL (or 14-32 µmol/L)", "C) 200-300 mcg/dL", "D) 350-500 mcg/dL"],
+        "answer": "B" 
+    },
+    {
+        "question": "49. What is the normal reference percentage for a Reticulocyte count?",
+        "options": ["A) 0.5% - 1.5%", "B) 3.0% - 5.0%", "C) 10.0% - 15.0%", "D) 20.0% - 25.0%"],
+        "answer": "A" 
+    },
+    {
+        "question": "50. What inheritance pattern characterizes the transmission of Thalassemia disorders?",
+        "options": ["A) Autosomal recessive trait", "B) X-linked dominant trait", "C) Autosomal dominant trait", "D) Y-linked trait"],
+        "answer": "A" 
+    }
+]`;
+const SEED_TITLE = "NCM 215A · Unit 3.1 Hematologic Disorders";
+
 /* ---------- parsing ---------- */
 function normalizeQuestions(parsed) {
-  const rawQuestions = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed?.questions)
-      ? parsed.questions
-      : Array.isArray(parsed?.quiz_questions)
-        ? parsed.quiz_questions
-        : Array.isArray(parsed?.items)
-          ? parsed.items
-          : null;
-
-  if (!rawQuestions || rawQuestions.length === 0) {
-    throw new Error("Couldn't find any question/option/answer blocks in that text.");
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("No questions found in that data.");
   }
+  return parsed.map((q, i) => {
+    const qText = q.question ?? q.q ?? q.prompt ?? `Question ${i + 1}`;
+    const rawOptions = q.options ?? q.answerOptions ?? q.choices ?? [];
 
-  return rawQuestions.map((q, i) => {
-    const qText = q.question ?? q.q ?? q.prompt;
-
-    if (!qText) {
-      throw new Error(`Question ${i + 1} is missing its question text.`);
-    }
-
-    const rawOptions =
-      q.options ??
-      q.answerOptions ??
-      q.choices;
-
-    if (!rawOptions) {
-      throw new Error(`Question ${i + 1} is missing its options.`);
-    }
-
-    let options = [];
-
-    // Format:
-    // ["Option A", "Option B", "Option C", "Option D"]
-    if (Array.isArray(rawOptions)) {
-      options = rawOptions.map((opt, index) => {
-        if (typeof opt === "string") {
-          return {
-            letter: String.fromCharCode(65 + index),
-            text: opt,
-            rationale: "",
-          };
-        }
-
+    const options = rawOptions.map((opt, j) => {
+      // object-style option, e.g. {text, isCorrect, rationale}
+      if (opt && typeof opt === "object" && !Array.isArray(opt)) {
         return {
-          letter:
-            opt.letter ??
-            String.fromCharCode(65 + index),
-          text:
-            opt.text ??
-            opt.label ??
-            opt.value ??
-            String(opt),
-          rationale:
-            opt.rationale ??
-            opt.explanation ??
-            "",
+          letter: String.fromCharCode(65 + j),
+          text: String(opt.text ?? opt.option ?? opt.label ?? ""),
+          isCorrect: Boolean(opt.isCorrect ?? opt.correct ?? false),
+          rationale: opt.rationale ?? opt.explanation ?? null,
         };
-      });
-    }
-
-    // Format:
-    // {
-    //   "A": "Option A",
-    //   "B": "Option B",
-    //   "C": "Option C",
-    //   "D": "Option D"
-    // }
-    else if (
-      typeof rawOptions === "object" &&
-      rawOptions !== null
-    ) {
-      options = Object.entries(rawOptions).map(
-        ([key, value]) => ({
-          letter: key,
-          text:
-            typeof value === "string"
-              ? value
-              : value?.text ??
-                value?.label ??
-                String(value),
-          rationale:
-            typeof value === "object"
-              ? value?.rationale ??
-                value?.explanation ??
-                ""
-              : "",
-        })
-      );
-    }
-
-    if (options.length === 0) {
-      throw new Error(`Question ${i + 1} has no usable options.`);
-    }
-
-    /*
-     * Convert the answer into a letter.
-     *
-     * Supports:
-     * "Nitrogen"
-     * "C"
-     * "C) Nitrogen"
-     * 3
-     */
-    const rawAnswer =
-      q.answer ??
-      q.correct_answer ??
-      q.correct ??
-      q.correctAnswer;
-
-    let answer = "";
-
-    if (typeof rawAnswer === "number") {
-      answer = String.fromCharCode(65 + rawAnswer - 1);
-    } else if (typeof rawAnswer === "string") {
-      const trimmedAnswer = rawAnswer.trim();
-
-      // Already a letter: A, B, C, D
-      if (/^[A-Z]$/i.test(trimmedAnswer)) {
-        answer = trimmedAnswer.toUpperCase();
       }
+      // plain-string option, e.g. "A) Blue"
+      const m = String(opt).match(/^\s*([A-Za-z])[).]\s*(.*)$/);
+      return m
+        ? { letter: m[1].toUpperCase(), text: m[2] }
+        : { letter: String.fromCharCode(65 + j), text: String(opt) };
+    });
 
-      // Format: "C) Nitrogen"
-      else {
-        const letterMatch = trimmedAnswer.match(/^([A-Z])[\).:\-]\s*/i);
-
-        if (letterMatch) {
-          answer = letterMatch[1].toUpperCase();
-        } else {
-          // Match answer text to an option
-          const matchingOption = options.find(
-            (opt) =>
-              opt.text.trim().toLowerCase() ===
-              trimmedAnswer.toLowerCase()
-          );
-
-          if (matchingOption) {
-            answer = matchingOption.letter;
-          }
-        }
-      }
-    }
-
+    let answer = String(q.answer ?? q.correct ?? "").trim().toUpperCase().replace(/[).].*$/, "");
     if (!answer) {
-      throw new Error(
-        `Question ${i + 1} has an answer that doesn't match any option.`
-      );
+      const correctOpt = options.find((o) => o.isCorrect);
+      if (correctOpt) answer = correctOpt.letter;
     }
 
-    return {
-      id: q.id ?? i + 1,
-      question: String(qText),
-      options,
-      answer,
-      explanation:
-        q.explanation ??
-        q.rationale ??
-        q.hint ??
-        "",
-    };
+    let explanation = q.explanation ?? q.rationale ?? q.hint ?? null;
+    if (!explanation) {
+      const correctOpt = options.find((o) => o.letter === answer);
+      if (correctOpt && correctOpt.rationale) explanation = correctOpt.rationale;
+    }
+
+    return { id: i, question: String(qText), options, answer, explanation };
   });
+}
+
+// Finds where the question list actually starts. Prefers a named key
+// ("questions" / "quiz_questions" / "items") over the very first '[' in the
+// text, since that first bracket might belong to a nested list (e.g. an
+// options array inside question #1) rather than the outer question list.
+function findListStart(text) {
+  const keyed = text.match(/(?:"quiz_questions"|"questions"|"items"|quiz_questions)\s*[:=]\s*\[/);
+  if (keyed) return keyed.index + keyed[0].length - 1;
+  return text.indexOf("[");
+}
+
+// Handles: Python lists (Gemini-style, with comments), plain JSON arrays,
+// JSON objects that wrap the list under a key like "questions" (optionally
+// nested, with per-option isCorrect/rationale fields), and Python literals
+// (True/False/None) in place of JSON booleans/null.
+function parseStructured(text) {
+  const start = findListStart(text);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === "[") depth++;
+    else if (text[i] === "]") {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end === -1) throw new Error("The question list is missing a closing ']'.");
+
+  let arr = text.slice(start, end);
+  arr = arr.replace(/#.*$/gm, "");           // strip python comments
+  arr = arr.replace(/,(\s*[}\]])/g, "$1");   // strip trailing commas
+
+  let parsed;
+  try {
+    parsed = JSON.parse(arr);
+  } catch (e) {
+    // retry, swapping Python literals for their JSON equivalents
+    // (only at value positions, to avoid touching option text)
+    const pyFixed = arr
+      .replace(/:\s*True\b/g, ": true")
+      .replace(/:\s*False\b/g, ": false")
+      .replace(/:\s*None\b/g, ": null");
+    try {
+      parsed = JSON.parse(pyFixed);
+    } catch (e2) {
+      return null; // let the caller try a different strategy
+    }
+  }
+  return normalizeQuestions(parsed);
 }
 
 // Handles plain-text quiz exports, e.g.:
@@ -242,102 +425,6 @@ function parsePlainText(text) {
     answer: b.answer,
     explanation: null,
   }));
-}
-
-function findListStart(text) {
-  const patterns = [
-    /"quiz_questions"\s*:\s*\[/i,
-    /"questions"\s*:\s*\[/i,
-    /"items"\s*:\s*\[/i,
-    /quiz_questions\s*:\s*\[/i,
-    /questions\s*:\s*\[/i,
-    /items\s*:\s*\[/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return match.index + match[0].lastIndexOf("[");
-    }
-  }
-
-  return text.indexOf("[");
-}
-
-function parseStructured(text) {
-  const start = findListStart(text);
-
-  if (start === -1) {
-    throw new Error("No question list found.");
-  }
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let end = -1;
-
-  for (let i = start; i < text.length; i++) {
-    const char = text[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char === "[") {
-      depth++;
-    } else if (char === "]") {
-      depth--;
-
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-
-  if (end === -1) {
-    throw new Error("Couldn't find the end of the question list.");
-  }
-
-  let listText = text.slice(start, end + 1);
-
-  // Remove JavaScript/Python-style comments
-  listText = listText
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "")
-    .replace(/^\s*#.*$/gm, "");
-
-  // Remove trailing commas
-  listText = listText.replace(/,\s*([}\]])/g, "$1");
-
-  let parsed;
-
-  try {
-    parsed = JSON.parse(listText);
-  } catch {
-    // Try Python-style booleans/null
-    const pythonCompatible = listText
-      .replace(/\bTrue\b/g, "true")
-      .replace(/\bFalse\b/g, "false")
-      .replace(/\bNone\b/g, "null");
-
-    parsed = JSON.parse(pythonCompatible);
-  }
-
-  return normalizeQuestions(parsed);
 }
 
 function parseQuizSource(raw) {
@@ -417,7 +504,7 @@ function Pill({ tone, icon, count }) {
 
 /* ---------- main app ---------- */
 export default function StudyDeckApp() {
-  const [view, setView] = useState("loading"); // loading | library | import | quiz | summary | review
+  const [view, setView] = useState("loading"); // loading | library | import | quiz | summary
   const [decks, setDecks] = useState([]);
   const [activeDeck, setActiveDeck] = useState(null);
   const [order, setOrder] = useState([]); // array of question indices, in play order
@@ -437,13 +524,24 @@ export default function StudyDeckApp() {
   const [combining, setCombining] = useState(false);
 
   useEffect(() => {
-  (async () => {
-    const list = await loadDeckList();
-
-    setDecks(list);
-    setView("library");
-  })();
-}, []);
+    (async () => {
+      let list = await loadDeckList();
+      if (list.length === 0) {
+        try {
+          const questions = parseQuizSource(SEED_RAW);
+          const id = "seed-hematologic";
+          const deck = { id, name: SEED_TITLE, questions, createdAt: Date.now() };
+          await saveDeck(deck);
+          list = [{ id, name: SEED_TITLE, count: questions.length, createdAt: deck.createdAt }];
+          await saveDeckList(list);
+        } catch (e) {
+          // seed failed to parse; just start empty
+        }
+      }
+      setDecks(list);
+      setView("library");
+    })();
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -596,29 +694,6 @@ export default function StudyDeckApp() {
     if (pos > 0) setPos(pos - 1);
   }
 
-  function startReviewIncorrect() {
-  if (!activeDeck) return;
-
-  const incorrectPositions = order.filter((qIndex, questionPosition) => {
-    const chosenAnswer = selected[questionPosition];
-
-    return (
-      chosenAnswer !== undefined &&
-      chosenAnswer !== activeDeck.questions[qIndex].answer
-    );
-  });
-
-  if (incorrectPositions.length === 0) {
-    setToast("You have no incorrect answers to review.");
-    return;
-  }
-
-  setOrder(incorrectPositions);
-  setPos(0);
-  setSelected({});
-  setView("review");
-}
-
   const correctCount = Object.entries(selected).filter(
     ([qIdx, letter]) => activeDeck && letter === activeDeck.questions[order[qIdx]].answer
   ).length;
@@ -702,40 +777,16 @@ export default function StudyDeckApp() {
           />
         )}
 
-        {view === "review" && activeDeck && (
-        <ReviewView
-          deck={activeDeck}
-          order={order}
-          pos={pos}
-          selected={selected}
-          onChoose={choose}
-          onNext={() => {
-            if (pos < order.length - 1) {
-              setPos(pos + 1);
-            } else {
-              setView("summary");
-            }
-          }}
-          onBack={() => {
-            if (pos > 0) {
-              setPos(pos - 1);
-            }
-          }}
-          onClose={() => setView("summary")}
-          />
-          )}
-
         {view === "summary" && activeDeck && (
           <SummaryView
-          deck={activeDeck}
-          total={order.length}
-          correctCount={correctCount}
-          incorrectCount={incorrectCount}
-          onRetake={() => startQuiz({ id: activeDeck.id }, { reshuffle: false })}
-          onShuffleRetake={() => startQuiz({ id: activeDeck.id }, { reshuffle: true })}
-          onReviewIncorrect={startReviewIncorrect}
-          onLibrary={() => setView("library")}
-        />
+            deck={activeDeck}
+            total={order.length}
+            correctCount={correctCount}
+            incorrectCount={incorrectCount}
+            onRetake={() => startQuiz({ id: activeDeck.id }, { reshuffle: false })}
+            onShuffleRetake={() => startQuiz({ id: activeDeck.id }, { reshuffle: true })}
+            onLibrary={() => setView("library")}
+          />
         )}
       </div>
 
@@ -752,41 +803,39 @@ export default function StudyDeckApp() {
 
 /* ---------- Library ---------- */
 function Library({
-  decks, onOpen, onShuffleOpen, onDelete, onImport, renamingId, renameValue, setRenameValue, onStartRename, onCommitRename, onCancelRename,
+  decks, onOpen, onShuffleOpen, onDelete, onImport,
+  renamingId, renameValue, setRenameValue, onStartRename, onCommitRename, onCancelRename,
   selectMode, selectedIds, onToggleSelectMode, onToggleSelected, onCombine, combining,
 }) {
   return (
     <>
       <div style={{ padding: "20px 22px 14px", borderBottom: "1px solid #21242B" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600 }}>
-            Your decks
-          </div>
-
-                </div>
-
-        {decks.length > 1 && (
-          <button
-            className="sd-btn"
-            onClick={onToggleSelectMode}
-            style={{
-              fontSize: 13, fontWeight: 500, background: "transparent",
-              color: selectMode ? "#EDEFF2" : "#9AA1AC", padding: "6px 10px", borderRadius: 8,
-              border: selectMode ? "1px solid #2A2E36" : "1px solid transparent",
-              marginTop: 8,
-            }}
-          >
-            {selectMode ? "Done" : "Combine decks"}
-          </button>
-        )}
-      </div>
-
-      <div style={{ color: "#767C87", fontSize: 13, marginTop: 3, padding: "0 22px 14px" }}>
-        {selectMode
-          ? "Select two or more decks to merge into one."
-          : decks.length === 0
-            ? "Nothing here yet."
-            : `${decks.length} deck${decks.length === 1 ? "" : "s"} saved on this device`}
+          <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600 }}>Your decks</div>
+           <button onClick={onTestBackend}>
+            Test Backend
+            </button>
+          {decks.length > 1 && (
+            <button
+              className="sd-btn"
+              onClick={onToggleSelectMode}
+              style={{
+                fontSize: 13, fontWeight: 500, background: "transparent",
+                color: selectMode ? "#EDEFF2" : "#9AA1AC", padding: "6px 10px", borderRadius: 8,
+                border: selectMode ? "1px solid #2A2E36" : "1px solid transparent",
+              }}
+            >
+              {selectMode ? "Done" : "Combine decks"}
+            </button>
+          )}
+        </div>
+        <div style={{ color: "#767C87", fontSize: 13, marginTop: 3 }}>
+          {selectMode
+            ? "Select two or more decks to merge into one."
+            : decks.length === 0
+              ? "Nothing here yet."
+              : `${decks.length} deck${decks.length === 1 ? "" : "s"} saved on this device`}
+        </div>
       </div>
 
       <div className="sd-scroll" style={{ padding: 14 }}>
@@ -1128,16 +1177,7 @@ function QuizView({ deck, order, pos, selected, correctCount, incorrectCount, on
 }
 
 /* ---------- Summary ---------- */
-function SummaryView({
-  deck,
-  total,
-  correctCount,
-  incorrectCount,
-  onRetake,
-  onShuffleRetake,
-  onReviewIncorrect,
-  onLibrary,
-}) {
+function SummaryView({ deck, total, correctCount, incorrectCount, onRetake, onShuffleRetake, onLibrary }) {
   const pct = total ? Math.round((correctCount / total) * 100) : 0;
   return (
     <div style={{ padding: "40px 30px", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flex: 1, justifyContent: "center" }}>
@@ -1152,26 +1192,6 @@ function SummaryView({
         <button className="sd-btn" onClick={onShuffleRetake} style={{ padding: "12px 16px", borderRadius: 10, background: "#4C8DFF", color: "#fff", fontSize: 14.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           <Shuffle size={15} /> Retake, shuffled
         </button>
-      {incorrectCount > 0 && (
-  <button
-    className="sd-btn"
-    onClick={onReviewIncorrect}
-    style={{
-      padding: "12px 16px",
-      borderRadius: 10,
-      background: "#1E2126",
-      color: "#C6CAD2",
-      fontSize: 14.5,
-      fontWeight: 500,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8,
-    }}
-  >
-    <RotateCcw size={15} /> Review incorrect answers
-  </button>
-)}
         <button className="sd-btn" onClick={onRetake} style={{ padding: "12px 16px", borderRadius: 10, background: "#1E2126", color: "#C6CAD2", fontSize: 14.5, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           <RotateCcw size={15} /> Retake, same order
         </button>
@@ -1180,341 +1200,5 @@ function SummaryView({
         </button>
       </div>
     </div>
-  );
-}
-
-/* ---------- Review Incorrect Answers ---------- */
-function ReviewView({
-  deck,
-  order,
-  pos,
-  selected,
-  onChoose,
-  onNext,
-  onBack,
-  onClose,
-}) {
-  const qIndex = order[pos];
-  const q = deck.questions[qIndex];
-  const chosen = selected[pos];
-  const answered = chosen !== undefined;
-
-  const progress = ((pos + (answered ? 1 : 0)) / order.length) * 100;
-
-  return (
-    <>
-      <div
-        style={{
-          padding: "16px 22px 12px",
-          borderBottom: "1px solid #21242B",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: 14.5,
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                paddingRight: 12,
-              }}
-            >
-              Review incorrect answers
-            </div>
-
-            <div
-              style={{
-                fontSize: 12,
-                color: "#767C87",
-                marginTop: 3,
-              }}
-            >
-              {deck.name}
-            </div>
-          </div>
-
-          <button
-            className="sd-icon sd-btn"
-            onClick={onClose}
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 8,
-              background: "transparent",
-              color: "#9AA1AC",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <X size={17} />
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 14,
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              height: 4,
-              background: "#21242B",
-              borderRadius: 999,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${progress}%`,
-                height: "100%",
-                background: "#4C8DFF",
-                borderRadius: 999,
-                transition: "width 200ms ease",
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              fontSize: 12.5,
-              color: "#767C87",
-              flexShrink: 0,
-            }}
-          >
-            {pos + 1} / {order.length}
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="sd-scroll"
-        style={{
-          padding: "22px 22px 10px",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 12.5,
-            color: "#767C87",
-            marginBottom: 8,
-            fontWeight: 500,
-          }}
-        >
-          Missed Question {pos + 1}
-        </div>
-
-        <div
-          style={{
-            fontFamily: "var(--font-serif)",
-            fontSize: 19,
-            lineHeight: 1.45,
-            marginBottom: 20,
-          }}
-        >
-          {q.question.replace(/^\d+\.\s*/, "")}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          {q.options.map((opt) => {
-            const isCorrect = opt.letter === q.answer;
-            const isChosen = opt.letter === chosen;
-
-            let bg = "#1E2126";
-            let border = "1px solid #2A2E36";
-
-            if (answered && isCorrect) {
-              bg = "rgba(52,199,123,0.12)";
-              border = "1px solid rgba(52,199,123,0.4)";
-            }
-
-            if (answered && isChosen && !isCorrect) {
-              bg = "rgba(241,101,101,0.12)";
-              border = "1px solid rgba(241,101,101,0.4)";
-            }
-
-            return (
-              <button
-                key={opt.letter}
-                className="sd-opt sd-btn"
-                disabled={answered}
-                onClick={() => onChoose(opt.letter)}
-                style={{
-                  textAlign: "left",
-                  background: bg,
-                  border,
-                  borderRadius: 10,
-                  padding: "13px 14px",
-                  cursor: answered ? "default" : "pointer",
-                  color: "#EDEFF2",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "baseline",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "var(--font-serif)",
-                        fontSize: 15,
-                        color: "#9AA1AC",
-                      }}
-                    >
-                      {opt.letter}.
-                    </span>
-
-                    <span style={{ fontSize: 14.5 }}>
-                      {opt.text}
-
-                      {answered && isChosen && !isCorrect && (
-                        <span
-                          style={{
-                            color: "#767C87",
-                            fontSize: 12.5,
-                          }}
-                        >
-                          {" "}
-                          (your answer)
-                        </span>
-                      )}
-                    </span>
-                  </div>
-
-                  {answered && isCorrect && (
-                    <span
-                      style={{
-                        background: "rgba(52,199,123,0.18)",
-                        color: "#4ADE94",
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        padding: "3px 9px",
-                        borderRadius: 999,
-                        flexShrink: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <Check size={11} /> Correct answer
-                    </span>
-                  )}
-
-                  {answered && isChosen && !isCorrect && (
-                    <span
-                      style={{
-                        background: "rgba(241,101,101,0.18)",
-                        color: "#FF8787",
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        padding: "3px 9px",
-                        borderRadius: 999,
-                        flexShrink: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <X size={11} /> Your answer
-                    </span>
-                  )}
-                </div>
-
-                {answered && isCorrect && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      fontSize: 13,
-                      color: "#9AA1AC",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {opt.rationale || q.explanation || "This is the correct answer."}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div
-        style={{
-          padding: 16,
-          borderTop: "1px solid #21242B",
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 10,
-        }}
-      >
-        <button
-          className="sd-btn"
-          onClick={onBack}
-          disabled={pos === 0}
-          style={{
-            padding: "10px 18px",
-            borderRadius: 10,
-            background: "#1E2126",
-            color: pos === 0 ? "#4B5058" : "#C6CAD2",
-            fontSize: 14,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <ChevronLeft size={15} /> Back
-        </button>
-
-        <button
-          className="sd-btn"
-          onClick={onNext}
-          disabled={!answered}
-          style={{
-            padding: "10px 20px",
-            borderRadius: 10,
-            background: answered ? "#4C8DFF" : "#2A2E36",
-            color: answered ? "#fff" : "#767C87",
-            fontSize: 14,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          {pos === order.length - 1 ? "Finish review" : "Next"}{" "}
-          <ChevronRight size={15} />
-        </button>
-      </div>
-    </>
   );
 }
