@@ -44,10 +44,7 @@ function normalizeQuestions(parsed) {
       throw new Error(`Question ${i + 1} is missing its question text.`);
     }
 
-    const rawOptions =
-      q.options ??
-      q.answerOptions ??
-      q.choices;
+    const rawOptions = q.options ?? q.answerOptions ?? q.choices;
 
     if (!rawOptions) {
       throw new Error(`Question ${i + 1} is missing its options.`);
@@ -55,7 +52,7 @@ function normalizeQuestions(parsed) {
 
     let options = [];
 
-    // Format:
+    // Options are an array:
     // ["Option A", "Option B", "Option C", "Option D"]
     if (Array.isArray(rawOptions)) {
       options = rawOptions.map((opt, index) => {
@@ -68,9 +65,7 @@ function normalizeQuestions(parsed) {
         }
 
         return {
-          letter:
-            opt.letter ??
-            String.fromCharCode(65 + index),
+          letter: opt.letter ?? String.fromCharCode(65 + index),
           text:
             opt.text ??
             opt.label ??
@@ -84,7 +79,7 @@ function normalizeQuestions(parsed) {
       });
     }
 
-    // Format:
+    // Options are an object:
     // {
     //   "A": "Option A",
     //   "B": "Option B",
@@ -96,37 +91,44 @@ function normalizeQuestions(parsed) {
       rawOptions !== null
     ) {
       options = Object.entries(rawOptions).map(
-        ([key, value]) => ({
-          letter: key,
-          text:
-            typeof value === "string"
-              ? value
-              : value?.text ??
-                value?.label ??
-                String(value),
-          rationale:
-            typeof value === "object"
-              ? value?.rationale ??
-                value?.explanation ??
-                ""
-              : "",
-        })
+        ([key, value]) => {
+          let text = "";
+          let rationale = "";
+
+          if (typeof value === "string") {
+            text = value;
+          } else if (
+            typeof value === "object" &&
+            value !== null
+          ) {
+            text =
+              value.text ??
+              value.label ??
+              value.value ??
+              "";
+
+            rationale =
+              value.rationale ??
+              value.explanation ??
+              "";
+          }
+
+          return {
+            letter: key.toUpperCase(),
+            text: String(text),
+            rationale: String(rationale),
+          };
+        }
       );
     }
 
     if (options.length === 0) {
-      throw new Error(`Question ${i + 1} has no usable options.`);
+      throw new Error(
+        `Question ${i + 1} has no usable options.`
+      );
     }
 
-    /*
-     * Convert the answer into a letter.
-     *
-     * Supports:
-     * "Nitrogen"
-     * "C"
-     * "C) Nitrogen"
-     * 3
-     */
+    // Support different answer field names.
     const rawAnswer =
       q.answer ??
       q.correct_answer ??
@@ -137,22 +139,28 @@ function normalizeQuestions(parsed) {
 
     if (typeof rawAnswer === "number") {
       answer = String.fromCharCode(65 + rawAnswer - 1);
-    } else if (typeof rawAnswer === "string") {
+    }
+
+    else if (typeof rawAnswer === "string") {
       const trimmedAnswer = rawAnswer.trim();
 
-      // Already a letter: A, B, C, D
+      // Answer is already a letter: "A", "B", "C", "D"
       if (/^[A-Z]$/i.test(trimmedAnswer)) {
         answer = trimmedAnswer.toUpperCase();
       }
 
-      // Format: "C) Nitrogen"
+      // Answer is something like "A. Nitrogen"
       else {
-        const letterMatch = trimmedAnswer.match(/^([A-Z])[\).:\-]\s*/i);
+        const letterMatch =
+          trimmedAnswer.match(/^([A-Z])[\).:\-]\s*/i);
 
         if (letterMatch) {
           answer = letterMatch[1].toUpperCase();
-        } else {
-          // Match answer text to an option
+        }
+
+        // Answer is the full option text:
+        // "Nitrogen"
+        else {
           const matchingOption = options.find(
             (opt) =>
               opt.text.trim().toLowerCase() ===
@@ -168,15 +176,20 @@ function normalizeQuestions(parsed) {
 
     if (!answer) {
       throw new Error(
-        `Question ${i + 1} has an answer that doesn't match any option.`
+        `Question ${i + 1}: couldn't match answer "${rawAnswer}" to an option.`
       );
     }
 
     return {
       id: q.id ?? i + 1,
       question: String(qText),
+
+      // IMPORTANT:
+      // Always store options as an array.
       options,
+
       answer,
+
       explanation:
         q.explanation ??
         q.rationale ??
@@ -558,31 +571,87 @@ export default function StudyDeckApp() {
   }
 
   async function handleCombine() {
-    if (selectedIds.size < 2) return;
+  if (selectedIds.size < 2) {
+    setToast("Select at least 2 decks to combine.");
+    return;
+  }
+
+  try {
     setCombining(true);
+
     const ids = [...selectedIds];
-    const fullDecks = (await Promise.all(ids.map((id) => loadDeck(id)))).filter(Boolean);
-    const combinedQuestions = fullDecks.flatMap((d) => d.questions.map((q) => ({ ...q })));
-    combinedQuestions.forEach((q, i) => { q.id = i; });
+
+    const fullDecks = await Promise.all(
+      ids.map((id) => loadDeck(id))
+    );
+
+    const validDecks = fullDecks.filter(
+      (deck) => deck && Array.isArray(deck.questions)
+    );
+
+    if (validDecks.length < 2) {
+      throw new Error("Couldn't load the selected decks.");
+    }
+
+    const combinedQuestions = validDecks.flatMap((deck) =>
+      deck.questions.map((question) => ({
+        ...question,
+      }))
+    );
+
+    if (combinedQuestions.length === 0) {
+      throw new Error("The selected decks don't contain any questions.");
+    }
+
+    // Give every question a new unique position
+    combinedQuestions.forEach((question, index) => {
+      question.id = index + 1;
+    });
+
     const deckMetas = await loadDeckList();
+
     const namesInOrder = ids
-      .map((id) => deckMetas.find((d) => d.id === id)?.name)
+      .map((id) => deckMetas.find((deck) => deck.id === id)?.name)
       .filter(Boolean);
+
     const name = namesInOrder.length
-      ? `${namesInOrder.join(" + ")}`.slice(0, 120)
+      ? namesInOrder.join(" + ").slice(0, 120)
       : `Combined deck (${combinedQuestions.length} items)`;
-    const id = uniqueId("deck");
-    const deck = { id, name, questions: combinedQuestions, createdAt: Date.now() };
-    await saveDeck(deck);
+
+    const newId = uniqueId("deck");
+
+    const combinedDeck = {
+      id: newId,
+      name,
+      questions: combinedQuestions,
+      createdAt: Date.now(),
+    };
+
+    await saveDeck(combinedDeck);
+
     const list = await loadDeckList();
-    list.unshift({ id, name, count: combinedQuestions.length, createdAt: deck.createdAt });
+
+    list.unshift({
+      id: newId,
+      name,
+      count: combinedQuestions.length,
+      createdAt: combinedDeck.createdAt,
+    });
+
     await saveDeckList(list);
+
     setDecks(list);
-    setCombining(false);
     setSelectMode(false);
     setSelectedIds(new Set());
+
     setToast(`Combined into “${name}”`);
+  } catch (error) {
+    console.error("Combine decks error:", error);
+    setToast(error.message || "Couldn't combine the selected decks.");
+  } finally {
+    setCombining(false);
   }
+}
 
   function choose(letter) {
     setSelected((s) => (s[pos] !== undefined ? s : { ...s, [pos]: letter }));
